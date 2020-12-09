@@ -15,6 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestInternel(t *testing.T) {
+	log := New()
+	log.Info(1)
+	time.Sleep(time.Second)
+}
+
 func TestFormatting(t *testing.T) {
 	tf := &TextFormatter{DisableColors: true}
 

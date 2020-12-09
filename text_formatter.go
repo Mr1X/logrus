@@ -15,16 +15,34 @@ import (
 
 const (
 	red    = 31
+	green  = 32
 	yellow = 33
 	blue   = 36
 	gray   = 37
 )
 
+const (
+	ShowFileOff   = iota
+	ShowFileLong  // full file name and line number: /a/b/c/d.go:23
+	ShowFileShort // final file name element and line number: d.go:23. overrides Llongfile
+)
+
 var baseTimestamp time.Time
+var timestampFormat string = "2006-01-02 15:04:05.000"
 
 func init() {
 	baseTimestamp = time.Now()
 }
+
+var (
+	// TextFormatterDefault .
+	TextFormatterDefault TextFormatter = TextFormatter{
+		ForceColors:     true,
+		FullTimestamp:   true,
+		TimestampFormat: timestampFormat,
+		ShowFile:        ShowFileShort,
+	}
+)
 
 // TextFormatter formats logs into text
 type TextFormatter struct {
@@ -96,6 +114,12 @@ type TextFormatter struct {
 
 	// The max length of the level text, generated dynamically on init
 	levelTextMaxLength int
+
+	// ShowFile can be set show file line or not
+	ShowFile int
+
+	// ShowFunc
+	ShowFunc bool
 }
 
 func (f *TextFormatter) init(entry *Entry) {
@@ -145,12 +169,6 @@ func (f *TextFormatter) Format(entry *Entry) ([]byte, error) {
 		fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyTime))
 	}
 	fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyLevel))
-	if entry.Message != "" {
-		fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyMsg))
-	}
-	if entry.err != "" {
-		fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyLogrusError))
-	}
 	if entry.HasCaller() {
 		if f.CallerPrettyfier != nil {
 			funcVal, fileVal = f.CallerPrettyfier(entry.Caller)
@@ -159,12 +177,27 @@ func (f *TextFormatter) Format(entry *Entry) ([]byte, error) {
 			fileVal = fmt.Sprintf("%s:%d", entry.Caller.File, entry.Caller.Line)
 		}
 
-		if funcVal != "" {
+		if fileVal != "" {
+			if f.ShowFile == ShowFileLong {
+				short := getShortFile(fileVal)
+				fileVal = short
+				fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyFile))
+			} else if f.ShowFile == ShowFileShort {
+				fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyFile))
+			}
+		}
+		if funcVal != "" && f.ShowFunc {
 			fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyFunc))
 		}
-		if fileVal != "" {
-			fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyFile))
-		}
+		// if fileVal != "" {
+		// 	fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyFile))
+		// }
+	}
+	if entry.Message != "" {
+		fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyMsg))
+	}
+	if entry.err != "" {
+		fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyLogrusError))
 	}
 
 	if !f.DisableSorting {
@@ -196,6 +229,7 @@ func (f *TextFormatter) Format(entry *Entry) ([]byte, error) {
 	if timestampFormat == "" {
 		timestampFormat = defaultTimestampFormat
 	}
+
 	if f.isColored() {
 		f.printColored(b, entry, keys, data, timestampFormat)
 	} else {
@@ -236,9 +270,9 @@ func (f *TextFormatter) printColored(b *bytes.Buffer, entry *Entry, keys []strin
 	case ErrorLevel, FatalLevel, PanicLevel:
 		levelColor = red
 	case InfoLevel:
-		levelColor = blue
+		levelColor = green
 	default:
-		levelColor = blue
+		levelColor = green
 	}
 
 	levelText := strings.ToUpper(entry.Level.String())
@@ -268,12 +302,21 @@ func (f *TextFormatter) printColored(b *bytes.Buffer, entry *Entry, keys []strin
 			funcVal, fileVal = f.CallerPrettyfier(entry.Caller)
 		}
 
-		if fileVal == "" {
-			caller = funcVal
-		} else if funcVal == "" {
+		short := getShortFile(fileVal)
+		// if fileVal == "" {
+		// 	caller = funcVal
+		// } else if funcVal == "" {
+		// 	caller = fileVal
+		// } else {
+		// 	caller = fileVal + " " + funcVal
+		// }
+		if f.ShowFile == ShowFileLong {
 			caller = fileVal
-		} else {
-			caller = fileVal + " " + funcVal
+		} else if f.ShowFile == ShowFileShort {
+			caller = short
+		}
+		if f.ShowFunc {
+			caller += funcVal
 		}
 	}
 
@@ -283,13 +326,24 @@ func (f *TextFormatter) printColored(b *bytes.Buffer, entry *Entry, keys []strin
 	case !f.FullTimestamp:
 		fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m[%04d]%s %-44s ", levelColor, levelText, int(entry.Time.Sub(baseTimestamp)/time.Second), caller, entry.Message)
 	default:
-		fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m[%s]%s %-44s ", levelColor, levelText, entry.Time.Format(timestampFormat), caller, entry.Message)
+		fmt.Fprintf(b, "[%s]\x1b[%dm[%s] %s %-44s\x1b[0m", entry.Time.Format(timestampFormat), levelColor, levelText, caller, entry.Message)
 	}
 	for _, k := range keys {
 		v := data[k]
-		fmt.Fprintf(b, " \x1b[%dm%s\x1b[0m=", levelColor, k)
+		fmt.Fprintf(b, " %s=", k)
 		f.appendValue(b, v)
 	}
+}
+
+func getShortFile(fileVal string) string {
+	short := fileVal
+	for i := len(fileVal) - 1; i > 0; i-- {
+		if fileVal[i] == '/' {
+			short = fileVal[i+1:]
+			break
+		}
+	}
+	return short
 }
 
 func (f *TextFormatter) needsQuoting(text string) bool {

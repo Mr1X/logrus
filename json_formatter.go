@@ -20,6 +20,13 @@ func (f FieldMap) resolve(key fieldKey) string {
 	return string(key)
 }
 
+var (
+	// JSONFormatterDefault .
+	JSONFormatterDefault JSONFormatter = JSONFormatter{
+		TimestampFormat: timestampFormat,
+	}
+)
+
 // JSONFormatter formats logs into parsable json
 type JSONFormatter struct {
 	// TimestampFormat sets the format used for marshaling timestamps.
